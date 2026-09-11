@@ -1,185 +1,102 @@
-
-import random
+import re
+import requests
+import pandas as pd
 import streamlit as st
+import plotly.express as px
 
-# 1. 페이지 기본 설정 및 커스텀 파스텔 CSS 적용
-st.set_page_config(
-    page_title="MBTI 몽글몽글 여행지 추천 ✈️",
-    page_icon="🌸",
-    layout="centered",
-)
+st.set_page_config(page_title="전국 고령화 지도", layout="wide")
+st.title("🗺️ 전국 고령화 지도")
+st.caption("시군구별 65세 이상 인구 비율 (행정안전부 주민등록 인구)")
 
-st.markdown(
-    """
-    <style>
-    /* 전체 배경에 부드러운 파스텔 핑크/보라 그라데이션 적용 */
-    .stApp {
-        background: linear-gradient(135deg, #fff5f8 0%, #f3e8ff 100%);
-    }
-    
-    /* 제목 스타일 */
-    .main-title {
-        color: #ff6b81;
-        font-size: 2.3rem;
-        font-weight: 800;
-        text-align: center;
-        margin-bottom: 5px;
-    }
-    .sub-title {
-        color: #7d5fff;
-        font-size: 1.05rem;
-        text-align: center;
-        margin-bottom: 25px;
-    }
+POP_URL = "https://raw.githubusercontent.com/greatsong/modudata/main/data/population_yearly.csv.gz"
+GEO_URL = "https://raw.githubusercontent.com/greatsong/modudata/main/data/boundaries/sigungu_kr.geojson"
 
-    /* 결과 카드를 위한 귀여운 둥근 상자 */
-    .result-card {
-        background-color: rgba(255, 255, 255, 0.85);
-        border-radius: 20px;
-        padding: 25px;
-        box-shadow: 0px 10px 20px rgba(255, 182, 193, 0.3);
-        border: 2px solid #ffcca1;
-        margin-top: 15px;
-    }
-    
-    /* 버튼 스타일 커스텀 */
-    div.stButton > button {
-        background: linear-gradient(90deg, #ff758c 0%, #ff7eb3 100%);
-        color: white;
-        border: none;
-        border-radius: 25px;
-        padding: 12px 24px;
-        font-size: 1.1rem;
-        font-weight: bold;
-        box-shadow: 0 4px 15px rgba(255, 117, 140, 0.4);
-        transition: all 0.3s ease;
-        width: 100%;
-    }
-    div.stButton > button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 6px 20px rgba(255, 117, 140, 0.6);
-    }
-    </style>
-""",
-    unsafe_allow_html=True,
-)
+@st.cache_data(show_spinner="인구 데이터를 불러오는 중입니다...")
+def load_population():
+    # '코드' 열은 앞자리 0이 사라지지 않게 글자로 읽습니다
+    return pd.read_csv(POP_URL, dtype={"코드": str})
 
-# 2. MBTI 데이터베이스
-mbti_data = {
-    "ENFP": {
-        "title": "🎉 흥미진진 호기심 대장",
-        "spot": "발리, 인도네시아 🇮🇩",
-        "desc": "매일 새로운 액티비티가 기다리는 발리! 자유로운 영혼에게 딱이에요.",
-        "tips": ["스쿠버 다이빙 체험하기", "서핑 도전하기", "야시장 털기"],
-    },
-    "INFJ": {
-        "title": "🌿 조용한 사색의 조력자",
-        "spot": "교토, 일본 🇯🇵",
-        "desc": "고즈넉한 대나무 숲과 오래된 사찰을 거닐며 마음에 평화를 찾아보세요.",
-        "tips": ["아라시야마 대나무 숲 걷기", "전통 찻집 가기", "조용한 카메라인생샷"],
-    },
-    "INTP": {
-        "title": "🔍 아이디어 파라다이스",
-        "spot": "런던, 영국 🇬🇧",
-        "desc": "박물관과 미술관이 가득한 도시! 지적 호기심을 마음껏 채워봐요.",
-        "tips": ["대영박물관 둘러보기", "오래된 고서점 방문", "빅벤 야경 감상"],
-    },
-    "ENTJ": {
-        "title": "👑 완벽한 플래너 비전가",
-        "spot": "뉴욕, 미국 🇺🇸",
-        "desc": "화려한 트렌드의 중심지! 빽빽한 일정표를 채우며 성취감을 느낄 수 있어요.",
-        "tips": ["엠파이어 스테이트 전망대", "브로드웨이 뮤지컬", "센트럴파크 산책"],
-    },
-    "ESFP": {
-        "title": "✨ 흥 부자 에너자이저",
-        "spot": "바르셀로나, 스페인 🇪🇸",
-        "desc": "열정적인 축제와 맛있는 타파스! 분위기에 취해 신나게 즐겨보세요.",
-        "tips": ["사그라다 파밀리아 관람", "해변 비치 바 가기", "플라멩코 공연 보기"],
-    },
-    "ISTJ": {
-        "title": "📐 신뢰 만점 원칙주의자",
-        "spot": "취리히, 스위스 🇨🇭",
-        "desc": "정확한 기차 시간표와 깨끗한 자연환경! 안심하고 계획대로 여행할 수 있어요.",
-        "tips": ["산악열차 타고 융프라우 가기", "호수 유람선 타기", "치즈 퐁뒤 먹기"],
-    },
+@st.cache_data(show_spinner="지도 경계를 불러오는 중입니다...")
+def load_geojson():
+    return requests.get(GEO_URL, timeout=30).json()
+
+df = load_population()
+geojson = load_geojson()
+
+# 1. 가장 최신 연도만 사용
+latest_year = int(df["연도"].max())
+df = df[df["연도"] == latest_year].copy()
+
+# 2. '계_'로 시작하는 나이 열만 (남_·여_ 열까지 더하면 두 배가 됩니다)
+total_cols = [c for c in df.columns if c.startswith("계_")]
+
+def age_of(col):
+    m = re.match(r"계_(\d+)세", col)
+    return int(m.group(1)) if m else None
+
+# 3. 그중 65세 이상 열만 ('계_65세' ~ '계_100세 이상')
+elderly_cols = [c for c in total_cols if age_of(c) is not None and age_of(c) >= 65]
+
+# 4. 동 단위로 전체 인구·고령 인구 계산
+df["전체인구"] = df[total_cols].sum(axis=1)
+df["고령인구"] = df[elderly_cols].sum(axis=1)
+
+# 5. '코드' 앞 5자리 = 시군구 코드 → 시군구별로 묶어 비율 계산
+df["시군구코드"] = df["코드"].str[:5]
+grouped = df.groupby("시군구코드")[["전체인구", "고령인구"]].sum().reset_index()
+grouped["고령화율"] = (grouped["고령인구"] / grouped["전체인구"] * 100).round(2)
+
+# 경계 파일에서 코드 → 시군구·시도 이름 짝 만들기
+names = pd.DataFrame([
+    {
+        "시군구코드": str(f["properties"]["코드"]),
+        "시군구": f["properties"]["시군구"],
+        "시도": f["properties"]["시도"],
+    }
+    for f in geojson["features"]
+])
+merged = grouped.merge(names, on="시군구코드", how="left")
+
+# 6. 5단계 색 구간 (전국 시군구를 다섯 덩어리로 나눈 실제 경계값)
+BINS = [0, 19, 23, 28, 38, 100]
+LABELS = ["19% 미만", "19~23%", "23~28%", "28~38%", "38% 이상"]
+COLORS = {
+    "19% 미만": "#fee6ce",
+    "19~23%": "#fdc086",
+    "23~28%": "#f79646",
+    "28~38%": "#e8590c",
+    "38% 이상": "#a63603",
 }
+merged["단계"] = pd.cut(merged["고령화율"], bins=BINS, labels=LABELS, right=False)
 
-# 기본 데이터에 없는 MBTI를 위한 공통 테마
-default_recommendation = {
-    "title": "🎈 어디로든 떠나고 싶은 탐험가",
-    "spot": "제주도, 대한민국 🇰🇷",
-    "desc": "푸른 바다와 맛있는 디저트가 기다리는 곳! 가볍게 떠나기 최고예요.",
-    "tips": ["돌담길 따라 산책하기", "예쁜 카페 투어", "오름에 올라 노을 보기"],
-}
-
-# 3. 앱 화면 구성
-st.markdown(
-    '<div class="main-title">🌸 MBTI 떠나자! ✈️</div>', unsafe_allow_html=True
+# 7. 단계구분도 그리기 (배경 지도 타일 없이 경계만)
+fig = px.choropleth(
+    merged,
+    geojson=geojson,
+    locations="시군구코드",
+    featureidkey="properties.코드",
+    color="단계",
+    category_orders={"단계": LABELS},
+    color_discrete_map=COLORS,
+    hover_name="시군구",
+    hover_data={"고령화율": True, "시도": True, "시군구코드": False, "단계": False},
+    labels={"고령화율": "65세 이상 비율(%)"},
 )
-st.markdown(
-    '<div class="sub-title">성향에 딱 맞는 찰떡 여행지를 찾아드려요! 💕</div>',
-    unsafe_allow_html=True,
+fig.update_geos(fitbounds="locations", visible=False)
+fig.update_layout(
+    margin=dict(l=0, r=0, t=10, b=0),
+    height=700,
+    legend_title_text=f"65세 이상 비율 ({latest_year}년)",
 )
 
-# 사이드바/메인 조합
-col1, col2 = st.columns([1, 1])
+st.plotly_chart(fig, width="stretch")
 
-with col1:
-    mbti_list = [
-        "ENFP",
-        "INFJ",
-        "INTP",
-        "ENTJ",
-        "ESFP",
-        "ISTJ",
-        "INFP",
-        "ESTP",
-        "ISFP",
-        "INTJ",
-        "ENTP",
-        "ESTJ",
-        "ISFJ",
-        "ESFJ",
-        "ISTP",
-        "INFJ",
-    ]
-    selected_mbti = st.selectbox(
-        "✨ MBTI를 선택해 주세요:", sorted(list(set(mbti_list)))
-    )
-
-with col2:
-    style_option = st.radio(
-        "🎀 어떤 느낌의 여행을 선호하나요?",
-        ["힐링&휴식 🍃", "액티비티&모험 🏄‍♂️", "문화&맛집 🍕"],
-    )
-
-st.write("")
-button_clicked = st.button("💖 내 맞춤 여행지 확인하기 💖")
-
-if button_clicked:
-    st.balloons()
-
-    info = mbti_data.get(selected_mbti, default_recommendation)
-
-    st.markdown(
-        f"""
-        <div class="result-card">
-            <h3 style="color: #ff6b81; margin-top:0;">{selected_mbti}만을 위한 추천 ✨</h3>
-            <h2 style="color: #4b6584;">📍 {info['spot']}</h2>
-            <p style="font-size: 1.1rem; color: #57606f;"><b>{info['title']}</b></p>
-            <p style="color: #2f3542;">{info['desc']}</p>
-            <hr style="border: 0.5px dashed #ffb8b8;">
-            <p style="font-weight: bold; color: #7d5fff;">🌟 추천 버킷리스트:</p>
-            <ul>
-                <li>{info['tips'][0]}</li>
-                <li>{info['tips'][1]}</li>
-                <li>{info['tips'][2]}</li>
-            </ul>
-        </div>
-    """,
-        unsafe_allow_html=True,
-    )
-
-    st.success(
-        f"선택하신 '{style_option}' 취향까지 고려해서 완벽한 일정을 준비해보세요! 🎒"
-    )
+# 8. 지도 아래 순위 표 두 개
+c1, c2 = st.columns(2)
+cols = ["시도", "시군구", "고령화율"]
+with c1:
+    st.subheader("🔴 고령화율 높은 곳 10")
+    st.dataframe(merged.nlargest(10, "고령화율")[cols].reset_index(drop=True))
+with c2:
+    st.subheader("🟢 고령화율 낮은 곳 10")
+    st.dataframe(merged.nsmallest(10, "고령화율")[cols].reset_index(drop=True))
